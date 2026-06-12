@@ -1,0 +1,28 @@
+﻿# Build output
+bin/
+obj/
+publish/
+
+# Credenciales - usar appsettings.example.json como plantilla
+appsettings.json
+appsettings.Development.json
+appsettings.*.json
+!appsettings.example.json
+
+# Logs
+logs/
+*.log
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+.nuget/
+
+# OS
+Thumbs.db
+.DS_Store
