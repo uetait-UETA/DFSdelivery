@@ -15,6 +15,9 @@ public interface IStoreSalesRepository
     Task UpsertErrorAsync(DeliveryError error);
     Task DeleteErrorAsync(string transnum, int itemnum);
 
+    Task<IEnumerable<(long Id, string Numserie, long Numalbaran)>> GetSalesWithoutTicketNoAsync();
+    Task UpdateTicketNoAsync(long id, string ticketNo);
+
     /// <summary>
     /// Retorna los DocNum distintos que ya tienen ODLN/ORDN creado
     /// pero todavía no tienen DeliveryDocEntry guardado.
@@ -54,13 +57,13 @@ public class StoreSalesRepository : IStoreSalesRepository
                  storenum, itemdatetime, skunum, pludesc, qty,
                  stdunitprice, extsellprice, extundiscprice, DeliveryDocNum,
                  NUMSERIE, NUMALBARAN, ABONODE_NUMALBARAN, ABONODE_NUMSERIE,
-                 TRANSTYPE, CodigoImpuesto, DutyType, SalesTaxAmount)
+                 TRANSTYPE, CodigoImpuesto, DutyType, SalesTaxAmount, TicketNo)
             VALUES
                 (@CompanyId, @Transnum, @Itemnum, @Txnvoidmod, @Txnmodifier,
                  @Storenum, @Itemdatetime, @Skunum, @Pludesc, @Qty,
                  @Stdunitprice, @Extsellprice, @Extundiscprice, NULL,
                  @Numserie, @Numalbaran, @Abonode_Numalbaran, @Abonode_Numserie,
-                 @TransType, @CodigoImpuesto, @DutyType, @SalesTaxAmount)
+                 @TransType, @CodigoImpuesto, @DutyType, @SalesTaxAmount, @TicketNo)
             """;
 
         await using var conn = _factory.CreateInternal();
@@ -105,7 +108,8 @@ public class StoreSalesRepository : IStoreSalesRepository
                 ISNULL(TRANSTYPE, 'DF')        AS TransType,
                 ISNULL(CodigoImpuesto, '')     AS CodigoImpuesto,
                 ISNULL(DutyType, 'DF')         AS DutyType,
-                ISNULL(SalesTaxAmount, 0)      AS SalesTaxAmount
+                ISNULL(SalesTaxAmount, 0)      AS SalesTaxAmount,
+                ISNULL(TicketNo, '')           AS TicketNo
             FROM [dbo].[la_store_sales]
             WHERE DeliveryDocNum IS NULL OR DeliveryDocNum = -1
             ORDER BY Itemdatetime, Transnum, Itemnum
@@ -167,6 +171,25 @@ public class StoreSalesRepository : IStoreSalesRepository
             "DELETE FROM [dbo].[la_delivery_errors] WHERE transnum = @Transnum AND itemnum = @Itemnum";
         await using var conn = _factory.CreateInternal();
         await conn.ExecuteAsync(sql, new { Transnum = transnum, Itemnum = itemnum });
+    }
+
+    public async Task<IEnumerable<(long Id, string Numserie, long Numalbaran)>> GetSalesWithoutTicketNoAsync()
+    {
+        const string sql = """
+            SELECT ID, NUMSERIE AS Numserie, NUMALBARAN AS Numalbaran
+            FROM [dbo].[la_store_sales]
+            WHERE TicketNo IS NULL OR TicketNo = ''
+            """;
+
+        await using var conn = _factory.CreateInternal();
+        return await conn.QueryAsync<(long Id, string Numserie, long Numalbaran)>(sql);
+    }
+
+    public async Task UpdateTicketNoAsync(long id, string ticketNo)
+    {
+        const string sql = "UPDATE [dbo].[la_store_sales] SET TicketNo = @TicketNo WHERE ID = @Id";
+        await using var conn = _factory.CreateInternal();
+        await conn.ExecuteAsync(sql, new { Id = id, TicketNo = ticketNo });
     }
 
     public async Task<IEnumerable<(long DocNum, bool EsDevolucion)>> GetDocNumsSinEntryAsync()

@@ -35,6 +35,9 @@ public class StoreSale
     /// <summary>Impuesto exacto de la transacción (TransactionGrandAmount - TransactionNetAmount). Igual en todas las líneas de la misma txn.</summary>
     public decimal SalesTaxAmount { get; set; }
 
+    /// <summary>Concatenación de SiteID-CashDrawerID-NroTicket del POS.</summary>
+    public string TicketNo { get; set; } = string.Empty;
+
     public bool EsDevolucion => Txnmodifier == 1;
 
     /// <summary>Impuesto derivado de los montos ya almacenados — sin columna extra.</summary>

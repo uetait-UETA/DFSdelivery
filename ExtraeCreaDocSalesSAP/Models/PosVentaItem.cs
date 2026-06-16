@@ -47,6 +47,9 @@ public class PosVentaItem
     public string? DevWorkstation { get; set; }
     public string? DevNroTicket { get; set; }
 
+    // Número de ticket impreso en caja
+    public int NroTicket { get; set; }
+
     // Campos calculados
     public string Transnum =>
         $"{PosLoc}{CashDrawerID}{SecuenciaTransaccion}";

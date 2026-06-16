@@ -70,11 +70,15 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
 try
 {
-    bool modoBackfill = args.Contains("--backfill", StringComparer.OrdinalIgnoreCase);
+    bool modoBackfill         = args.Contains("--backfill",          StringComparer.OrdinalIgnoreCase);
+    bool modoBackfillTicketNo = args.Contains("--backfill-ticketno", StringComparer.OrdinalIgnoreCase);
+
+    var modo = modoBackfill         ? "BACKFILL"
+             : modoBackfillTicketNo ? "BACKFILL-TICKETNO"
+             : "SYNC";
 
     Log.Information("ExtraeCreaDocSalesSAP iniciado. Entorno: {Env} | Modo: {Modo}",
-        builder.Environment.EnvironmentName,
-        modoBackfill ? "BACKFILL" : "SYNC");
+        builder.Environment.EnvironmentName, modo);
 
     await using var scope = host.Services.CreateAsyncScope();
 
@@ -82,6 +86,11 @@ try
     {
         var backfill = scope.ServiceProvider.GetRequiredService<IBackfillService>();
         await backfill.RunAsync(cts.Token);
+    }
+    else if (modoBackfillTicketNo)
+    {
+        var backfill = scope.ServiceProvider.GetRequiredService<IBackfillService>();
+        await backfill.RunTicketNoAsync(cts.Token);
     }
     else
     {
