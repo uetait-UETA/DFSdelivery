@@ -224,9 +224,10 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
 
         if (items.Count == 0) return (0, 0);
 
-        // Agrupar por (CardCode, FechaDoc, TransType)
+        // Agrupar por (CardCode, FechaDoc, TransType, TipoMovimiento)
+        // SAL = ventas (ODLN→OINV) | RET = devoluciones (ORDN→ORIN)
         var grupos = items
-            .GroupBy(i => $"{i.CardCode}|{i.FechaDoc:yyyy-MM-dd}|{i.TransType}")
+            .GroupBy(i => $"{i.CardCode}|{i.FechaDoc:yyyy-MM-dd}|{i.TransType}|{(i.EsDevolucion ? "RET" : "SAL")}")
             .ToList();
 
         _logger.LogInformation("Grupos a facturar: {Count}", grupos.Count);
@@ -270,8 +271,8 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                 continue;
             }
 
-            // Construir líneas de la factura consultando SAP para obtener LineNum real
-            var invoiceLines = await BuildInvoiceLinesAsync(grupo.ToList());
+            // Construir líneas consultando SAP: ODLN→BaseType15 para ventas, ORDN→BaseType16 para devoluciones
+            var invoiceLines = await BuildInvoiceLinesAsync(grupo.ToList(), esDevolucion);
 
             if (invoiceLines.Count == 0)
             {
@@ -282,7 +283,7 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                 continue;
             }
 
-            var esDevolucion = grupo.All(i => i.EsDevolucion);
+            var esDevolucion = sample.EsDevolucion;
 
             var invoiceRequest = new SapInvoiceRequest
             {
@@ -342,26 +343,28 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
     }
 
     private async Task<List<SapInvoiceLine>> BuildInvoiceLinesAsync(
-        List<InvoiceSalesItem> items)
+        List<InvoiceSalesItem> items, bool esDevolucion)
     {
-        var lines = new List<SapInvoiceLine>();
+        var lines    = new List<SapInvoiceLine>();
+        int baseType = esDevolucion ? 16 : 15;
+        var tipoDoc  = esDevolucion ? "ORDN" : "ODLN";
 
-        // Agrupar por DocEntry (un ODLN puede tener varias líneas)
+        // Agrupar por DocEntry (un documento SAP puede tener varias líneas)
         var porDocEntry = items.GroupBy(i => i.DeliveryDocEntry).ToList();
 
         foreach (var grupo in porDocEntry)
         {
-            var docEntry  = (int)grupo.Key;
-            var sapLines  = await _sap.GetDeliveryLinesAsync(docEntry);
+            var docEntry = (int)grupo.Key;
+
+            var sapLines = esDevolucion
+                ? await _sap.GetReturnLinesAsync(docEntry)
+                : await _sap.GetDeliveryLinesAsync(docEntry);
 
             if (sapLines.Count == 0)
             {
-                _logger.LogWarning("No se obtuvieron líneas del ODLN DocEntry={DE}", docEntry);
+                _logger.LogWarning("No se obtuvieron líneas del {Tipo} DocEntry={DE}", tipoDoc, docEntry);
                 return [];
             }
-
-            // BaseType 15 = DeliveryNote, 16 = Returns
-            int baseType = grupo.First().EsDevolucion ? 16 : 15;
 
             foreach (var sapLine in sapLines)
             {

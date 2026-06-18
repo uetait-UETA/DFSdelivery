@@ -84,6 +84,7 @@ public class PosRepository : IPosRepository
               AND POSItemID <> ''
               AND PosLoc    IS NOT NULL
               AND PosLoc    <> ''
+              AND ISNULL(TipoTransaccion, '') <> ''
             ORDER BY BusinessDayDate, TransactionID, SaleLineNumber
             """;
 

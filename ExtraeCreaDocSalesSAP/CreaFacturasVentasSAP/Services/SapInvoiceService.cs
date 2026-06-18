@@ -14,8 +14,11 @@ public interface ISapInvoiceService
     Task<bool> LoginAsync();
     Task LogoutAsync();
 
-    /// <summary>Obtiene las líneas (LineNum) de un DeliveryNote por su DocEntry.</summary>
+    /// <summary>Obtiene las líneas (LineNum) de un DeliveryNote (ODLN) por su DocEntry.</summary>
     Task<List<SapDeliveryLine>> GetDeliveryLinesAsync(int docEntry);
+
+    /// <summary>Obtiene las líneas (LineNum) de un Return (ORDN) por su DocEntry.</summary>
+    Task<List<SapDeliveryLine>> GetReturnLinesAsync(int docEntry);
 
     /// <summary>Crea una factura OINV. Retorna (DocNum, DocEntry).</summary>
     Task<(int DocNum, int DocEntry)> CreateInvoiceAsync(SapInvoiceRequest request);
@@ -119,11 +122,17 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
         }
     }
 
-    // ── Consulta líneas de ODLN ───────────────────────────────────────────────
+    // ── Consulta líneas de ODLN / ORDN ───────────────────────────────────────
 
-    public async Task<List<SapDeliveryLine>> GetDeliveryLinesAsync(int docEntry)
+    public Task<List<SapDeliveryLine>> GetDeliveryLinesAsync(int docEntry) =>
+        GetDocumentLinesAsync("DeliveryNotes", docEntry);
+
+    public Task<List<SapDeliveryLine>> GetReturnLinesAsync(int docEntry) =>
+        GetDocumentLinesAsync("Returns", docEntry);
+
+    private async Task<List<SapDeliveryLine>> GetDocumentLinesAsync(string sapEntity, int docEntry)
     {
-        var url = $"DeliveryNotes({docEntry})?$select=DocEntry,DocNum,DocumentLines";
+        var url = $"{sapEntity}({docEntry})?$select=DocEntry,DocNum,DocumentLines";
 
         for (int attempt = 1; attempt <= _cfg.MaxRetries; attempt++)
         {
@@ -142,7 +151,8 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
                 if (!response.IsSuccessStatusCode)
                 {
                     var body = await response.Content.ReadAsStringAsync();
-                    _logger.LogError("Error consultando ODLN DocEntry={DE}: {Body}", docEntry, body);
+                    _logger.LogError("Error consultando {Entity} DocEntry={DE}: {Body}",
+                        sapEntity, docEntry, body);
                     return [];
                 }
 
@@ -151,13 +161,13 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
             }
             catch (Exception ex) when (attempt < _cfg.MaxRetries)
             {
-                _logger.LogWarning(ex, "Error GET DeliveryNote {DE}, intento {A}/{M}",
-                    docEntry, attempt, _cfg.MaxRetries);
+                _logger.LogWarning(ex, "Error GET {Entity} {DE}, intento {A}/{M}",
+                    sapEntity, docEntry, attempt, _cfg.MaxRetries);
                 await Task.Delay(TimeSpan.FromSeconds(attempt * 2));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error definitivo GET DeliveryNote {DE}", docEntry);
+                _logger.LogError(ex, "Error definitivo GET {Entity} {DE}", sapEntity, docEntry);
                 return [];
             }
         }
