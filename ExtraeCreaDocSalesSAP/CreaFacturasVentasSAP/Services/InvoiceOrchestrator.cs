@@ -271,6 +271,8 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                 continue;
             }
 
+            var esDevolucion = sample.EsDevolucion;
+
             // Construir líneas consultando SAP: ODLN→BaseType15 para ventas, ORDN→BaseType16 para devoluciones
             var invoiceLines = await BuildInvoiceLinesAsync(grupo.ToList(), esDevolucion);
 
@@ -282,8 +284,6 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                     "No se obtuvieron líneas del ODLN desde SAP");
                 continue;
             }
-
-            var esDevolucion = sample.EsDevolucion;
 
             var invoiceRequest = new SapInvoiceRequest
             {
