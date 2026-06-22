@@ -14,6 +14,9 @@ public interface IDailyInvoiceRepository
 
     /// <summary>Actualiza el DocNum y DocEntry del Incoming Payment una vez creado.</summary>
     Task SetPaymentAsync(string cardCode, DateTime fecha, string transType, long paymentDocNum);
+
+    /// <summary>Retorna facturas con OINV creada pero sin cobro ORCT.</summary>
+    Task<IEnumerable<DailyInvoice>> GetFacturasSinCobroAsync();
 }
 
 public class DailyInvoiceRepository : IDailyInvoiceRepository
@@ -104,5 +107,20 @@ public class DailyInvoiceRepository : IDailyInvoiceRepository
             TransType     = transType,
             PaymentDocNum = paymentDocNum
         });
+    }
+
+    public async Task<IEnumerable<DailyInvoice>> GetFacturasSinCobroAsync()
+    {
+        const string sql = """
+            SELECT CardCode, FechaDoc, TransType, InvoiceDocEntry
+            FROM [dbo].[la_daily_invoices]
+            WHERE InvoiceDocNum > 0
+              AND PaymentDocNum IS NULL
+              AND InvoiceDocEntry IS NOT NULL
+            ORDER BY FechaDoc, CardCode
+            """;
+
+        await using var conn = _factory.CreateInternal();
+        return await conn.QueryAsync<DailyInvoice>(sql);
     }
 }

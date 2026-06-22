@@ -71,11 +71,15 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
 
         int facturasCreadas  = 0;
         int cobrosCreados    = 0;
+        int cobrosReintento  = 0;
         try
         {
             var tenderMappings = await _paymentRepo.GetTenderMappingsAsync();
             (facturasCreadas, cobrosCreados) =
                 await FaseBC_CrearFacturasYCobrosAsync(desde, hasta, tenderMappings, ct);
+
+            // Fase D: reintentar cobros de facturas previas sin ORCT
+            cobrosReintento = await FaseD_ReintentarCobrosAsync(tenderMappings, ct);
         }
         finally
         {
@@ -83,8 +87,8 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
         }
 
         _logger.LogInformation(
-            "Proceso finalizado — Pagos nuevos: {P} | Facturas SAP: {F} | Cobros SAP: {C}",
-            pagosInsertados, facturasCreadas, cobrosCreados);
+            "Proceso finalizado — Pagos nuevos: {P} | Facturas SAP: {F} | Cobros SAP: {C} | Cobros reintentados: {R}",
+            pagosInsertados, facturasCreadas, cobrosCreados, cobrosReintento);
         _logger.LogInformation("═══════════════════════════════════════════════════════");
     }
 
@@ -514,6 +518,32 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                 cardCode, fecha, transType, ex.Message);
             return false;
         }
+    }
+
+    // ── FASE D: Reintentar cobros de facturas previas sin ORCT ───────────────────
+
+    private async Task<int> FaseD_ReintentarCobrosAsync(
+        Dictionary<string, Models.TenderSapMapping> tenderMappings, CancellationToken ct)
+    {
+        var pendientes = (await _invoiceRepo.GetFacturasSinCobroAsync()).ToList();
+
+        _logger.LogInformation("Fase D: {Count} facturas sin cobro pendientes.", pendientes.Count);
+
+        if (pendientes.Count == 0) return 0;
+
+        int cobros = 0;
+        foreach (var inv in pendientes)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            bool ok = await FaseC_CrearCobroAsync(
+                inv.CardCode, inv.FechaDoc, inv.TransType,
+                inv.InvoiceDocEntry!.Value, tenderMappings);
+
+            if (ok) cobros++;
+        }
+
+        return cobros;
     }
 
     // ── DTOs internos para la extracción de pagos ─────────────────────────────
