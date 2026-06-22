@@ -328,7 +328,7 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                 if (!esDevolucion)
                 {
                     bool cobroOk = await FaseC_CrearCobroAsync(
-                        cardCode, bplId, fecha, transType, docEntry, tenderMappings);
+                        cardCode, fecha, transType, docEntry, tenderMappings);
                     if (cobroOk) cobrosCreados++;
                 }
             }
@@ -398,7 +398,7 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
     // ── FASE C: Crear cobro (Incoming Payment) ────────────────────────────────
 
     private async Task<bool> FaseC_CrearCobroAsync(
-        string cardCode, int bplId, DateTime fecha, string transType,
+        string cardCode, DateTime fecha, string transType,
         long invoiceDocEntry,
         Dictionary<string, Models.TenderSapMapping> tenderMappings)
     {
@@ -428,9 +428,8 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
 
         var request = new SapIncomingPaymentRequest
         {
-            CardCode                = cardCode,
-            BPL_IDAssignedToInvoice = bplId,
-            DocDate                 = fecha.ToString("yyyy-MM-dd"),
+            CardCode = cardCode,
+            DocDate  = fecha.ToString("yyyy-MM-dd"),
             PaymentInvoices =
             [
                 new SapPaymentInvoice

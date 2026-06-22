@@ -50,7 +50,6 @@ public class SapInvoiceLine
 public class SapIncomingPaymentRequest
 {
     public string CardCode { get; set; } = string.Empty;
-    public int BPL_IDAssignedToInvoice { get; set; }
     public string DocDate { get; set; } = string.Empty;
 
     public List<SapPaymentInvoice> PaymentInvoices { get; set; } = [];
