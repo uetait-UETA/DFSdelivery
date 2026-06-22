@@ -25,7 +25,12 @@ public class SapInvoiceRequest
     /// <summary>Texto libre visible en el documento SAP B1.</summary>
     public string? Comments { get; set; }
 
+    /// <summary>Referencia del cliente/proveedor — se fuerza a la fecha del documento para no heredar el del ODLN.</summary>
+    public string? NumAtCard { get; set; }
+
     public List<SapInvoiceLine> DocumentLines { get; set; } = [];
+
+    public List<SapDocumentExpense>? DocumentAdditionalExpenses { get; set; }
 }
 
 public class SapInvoiceLine
@@ -87,6 +92,29 @@ public class SapPaymentCheck
     public decimal CheckSum { get; set; }
 }
 
+// ── Freights / gastos adicionales ─────────────────────────────────────────────
+
+public class SapDocumentExpense
+{
+    [JsonPropertyName("ExpnsCode")]
+    public int ExpnsCode { get; set; }
+
+    [JsonPropertyName("LineTotal")]
+    public decimal LineTotal { get; set; }
+
+    [JsonPropertyName("TaxCode")]
+    public string? TaxCode { get; set; }
+
+    [JsonPropertyName("DistMethod")]
+    public string? DistMethod { get; set; }
+
+    [JsonPropertyName("Billable")]
+    public string? Billable { get; set; }
+
+    [JsonPropertyName("VatGroup")]
+    public string? VatGroup { get; set; }
+}
+
 // ── Respuesta GET DeliveryNotes / Returns ─────────────────────────────────────
 
 public class SapDeliveryNoteResponse
@@ -99,6 +127,9 @@ public class SapDeliveryNoteResponse
 
     [JsonPropertyName("DocumentLines")]
     public List<SapDeliveryLine>? DocumentLines { get; set; }
+
+    [JsonPropertyName("DocumentAdditionalExpenses")]
+    public List<SapDocumentExpense>? DocumentAdditionalExpenses { get; set; }
 }
 
 public class SapDeliveryLine
@@ -108,6 +139,13 @@ public class SapDeliveryLine
 
     [JsonPropertyName("ItemCode")]
     public string? ItemCode { get; set; }
+}
+
+/// <summary>Datos combinados de un ODLN/ORDN: líneas de ítems + freights.</summary>
+public class SapDocumentData
+{
+    public List<SapDeliveryLine> Lines    { get; init; } = [];
+    public List<SapDocumentExpense> Expenses { get; init; } = [];
 }
 
 // ── Respuesta de creación ─────────────────────────────────────────────────────

@@ -14,11 +14,11 @@ public interface ISapInvoiceService
     Task<bool> LoginAsync();
     Task LogoutAsync();
 
-    /// <summary>Obtiene las líneas (LineNum) de un DeliveryNote (ODLN) por su DocEntry.</summary>
-    Task<List<SapDeliveryLine>> GetDeliveryLinesAsync(int docEntry);
+    /// <summary>Obtiene líneas y freights de un DeliveryNote (ODLN) por su DocEntry.</summary>
+    Task<SapDocumentData> GetDeliveryLinesAsync(int docEntry);
 
-    /// <summary>Obtiene las líneas (LineNum) de un Return (ORDN) por su DocEntry.</summary>
-    Task<List<SapDeliveryLine>> GetReturnLinesAsync(int docEntry);
+    /// <summary>Obtiene líneas y freights de un Return (ORDN) por su DocEntry.</summary>
+    Task<SapDocumentData> GetReturnLinesAsync(int docEntry);
 
     /// <summary>Crea una factura OINV. Retorna (DocNum, DocEntry).</summary>
     Task<(int DocNum, int DocEntry)> CreateInvoiceAsync(SapInvoiceRequest request);
@@ -124,15 +124,15 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
 
     // ── Consulta líneas de ODLN / ORDN ───────────────────────────────────────
 
-    public Task<List<SapDeliveryLine>> GetDeliveryLinesAsync(int docEntry) =>
-        GetDocumentLinesAsync("DeliveryNotes", docEntry);
+    public Task<SapDocumentData> GetDeliveryLinesAsync(int docEntry) =>
+        GetDocumentDataAsync("DeliveryNotes", docEntry);
 
-    public Task<List<SapDeliveryLine>> GetReturnLinesAsync(int docEntry) =>
-        GetDocumentLinesAsync("Returns", docEntry);
+    public Task<SapDocumentData> GetReturnLinesAsync(int docEntry) =>
+        GetDocumentDataAsync("Returns", docEntry);
 
-    private async Task<List<SapDeliveryLine>> GetDocumentLinesAsync(string sapEntity, int docEntry)
+    private async Task<SapDocumentData> GetDocumentDataAsync(string sapEntity, int docEntry)
     {
-        var url = $"{sapEntity}({docEntry})?$select=DocEntry,DocNum,DocumentLines";
+        var url = $"{sapEntity}({docEntry})?$select=DocEntry,DocNum,DocumentLines,DocumentAdditionalExpenses";
 
         for (int attempt = 1; attempt <= _cfg.MaxRetries; attempt++)
         {
@@ -144,7 +144,7 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
                 if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
                     _sessionCookie = null;
-                    if (!await LoginAsync()) return [];
+                    if (!await LoginAsync()) return new SapDocumentData();
                     continue;
                 }
 
@@ -153,11 +153,15 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
                     var body = await response.Content.ReadAsStringAsync();
                     _logger.LogError("Error consultando {Entity} DocEntry={DE}: {Body}",
                         sapEntity, docEntry, body);
-                    return [];
+                    return new SapDocumentData();
                 }
 
                 var doc = await response.Content.ReadFromJsonAsync<SapDeliveryNoteResponse>(JsonOpts);
-                return doc?.DocumentLines ?? [];
+                return new SapDocumentData
+                {
+                    Lines    = doc?.DocumentLines    ?? [],
+                    Expenses = doc?.DocumentAdditionalExpenses ?? []
+                };
             }
             catch (Exception ex) when (attempt < _cfg.MaxRetries)
             {
@@ -168,11 +172,11 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error definitivo GET {Entity} {DE}", sapEntity, docEntry);
-                return [];
+                return new SapDocumentData();
             }
         }
 
-        return [];
+        return new SapDocumentData();
     }
 
     // ── Documentos ────────────────────────────────────────────────────────────
