@@ -182,8 +182,10 @@ public class SyncService : ISyncService
     /// <summary>
     /// Convierte el DutyType del POS ("DutyFree"/"DutyPaid") al código corto usado en ADR_TIENDA_SERIE ("DF"/"DP").
     /// </summary>
-    private static string NormalizeDutyType(string posItemDutyType) =>
-        posItemDutyType.Equals("DutyFree", StringComparison.OrdinalIgnoreCase) ? "DF" : "DP";
+    private static string NormalizeDutyType(string? posItemDutyType) =>
+        string.IsNullOrWhiteSpace(posItemDutyType) ? "DP" :
+        posItemDutyType.Equals("DutyFree", StringComparison.OrdinalIgnoreCase) ||
+        posItemDutyType.Equals("DF", StringComparison.OrdinalIgnoreCase) ? "DF" : "DP";
 
     // ─────────────────────────────────────────────────────────────────────────
     // FASE 2

@@ -56,6 +56,7 @@ public class InvoiceSalesRepository : IInvoiceSalesRepository
                AND ts.DUTYTYPE = ss.TRANSTYPE
             WHERE ss.DeliveryDocNum > 0
               AND ss.DeliveryDocEntry IS NOT NULL
+              AND ss.DeliveryDocEntry <> 99999999
               AND CAST(ss.itemdatetime AS DATE) BETWEEN @Desde AND @Hasta
               AND NOT EXISTS (
                   SELECT 1 FROM [dbo].[la_daily_invoices] di

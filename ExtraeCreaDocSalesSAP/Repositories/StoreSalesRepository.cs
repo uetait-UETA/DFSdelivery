@@ -107,7 +107,7 @@ public class StoreSalesRepository : IStoreSalesRepository
                 ABONODE_NUMSERIE    AS Abonode_Numserie,
                 ISNULL(TRANSTYPE, 'DF')        AS TransType,
                 ISNULL(CodigoImpuesto, '')     AS CodigoImpuesto,
-                ISNULL(DutyType, 'DF')         AS DutyType,
+                DutyType,
                 ISNULL(SalesTaxAmount, 0)      AS SalesTaxAmount,
                 ISNULL(TicketNo, '')           AS TicketNo
             FROM [dbo].[la_store_sales]
