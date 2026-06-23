@@ -247,6 +247,16 @@ public class SyncService : ISyncService
                         !i.Skunum.Trim().Equals(deeeCode, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        if (itemsDocumento.Count == 0)
+        {
+            _logger.LogWarning(
+                "Txn={Txn}: la transacción no tiene ítems de documento (solo ítems DEEE/impuesto). " +
+                "Se omite la creación del documento SAP.", transnum);
+            foreach (var item in items)
+                await _salesRepo.UpdateDeliveryDocNumAsync(item.ID, -2, 0);
+            return false;
+        }
+
         // Pre-calcular bodega por ítem según su DutyType (solo ítems de documento)
         var whsByItemId = new Dictionary<long, string>();
         foreach (var item in itemsDocumento)
@@ -411,6 +421,14 @@ public class SyncService : ISyncService
     private async Task RegistrarError(StoreSale item, string tipo, string detalle)
     {
         await _salesRepo.MarkAsErrorAsync(item.ID);
+
+        // El ítem DEEE (impuesto) se marca como error para que se reintente,
+        // pero NO se inserta en la_delivery_errors para no bloquear la facturación.
+        var deeeCode = _settings.FreightSettings.DeeeItemCode?.Trim();
+        if (!string.IsNullOrEmpty(deeeCode) &&
+            item.Skunum.Trim().Equals(deeeCode, StringComparison.OrdinalIgnoreCase))
+            return;
+
         await _salesRepo.UpsertErrorAsync(new DeliveryError
         {
             CompanyId      = item.CompanyId,

@@ -314,17 +314,22 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                     "{Tipo} creada: DocNum={DN} DocEntry={DE} | {CC}/{F:yyyy-MM-dd}/{T}",
                     tipoDoc, docNum, docEntry, cardCode, fecha, transType);
 
-                await _invoiceRepo.UpsertAsync(new DailyInvoice
+                // Las devoluciones (ORIN) no tienen cobro; no actualizar la_daily_invoices
+                // para evitar sobreescribir el DocEntry del OINV con el de la ORIN.
+                if (!esDevolucion)
                 {
-                    CompanyId       = sample.CompanyId,
-                    CardCode        = cardCode,
-                    BPLId           = bplId,
-                    FechaDoc        = fecha,
-                    TransType       = transType,
-                    InvoiceDocNum   = docNum,
-                    InvoiceDocEntry = docEntry,
-                    ErrorMessage    = null
-                });
+                    await _invoiceRepo.UpsertAsync(new DailyInvoice
+                    {
+                        CompanyId       = sample.CompanyId,
+                        CardCode        = cardCode,
+                        BPLId           = bplId,
+                        FechaDoc        = fecha,
+                        TransType       = transType,
+                        InvoiceDocNum   = docNum,
+                        InvoiceDocEntry = docEntry,
+                        ErrorMessage    = null
+                    });
+                }
 
                 facturasCreadas++;
 
@@ -332,7 +337,7 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
                 if (!esDevolucion)
                 {
                     bool cobroOk = await FaseC_CrearCobroAsync(
-                        cardCode, fecha, transType, docEntry, tenderMappings);
+                        cardCode, fecha, transType, bplId, docEntry, tenderMappings);
                     if (cobroOk) cobrosCreados++;
                 }
             }
@@ -403,7 +408,7 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
 
     private async Task<bool> FaseC_CrearCobroAsync(
         string cardCode, DateTime fecha, string transType,
-        long invoiceDocEntry,
+        int bplId, long invoiceDocEntry,
         Dictionary<string, Models.TenderSapMapping> tenderMappings)
     {
         _logger.LogDebug("Fase C: creando cobro para {CC}/{F:yyyy-MM-dd}/{T}",
@@ -430,10 +435,20 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
 
         decimal totalPagado = pagos.Sum(p => p.Amount);
 
+        if (totalPagado <= 0)
+        {
+            _logger.LogWarning(
+                "Total de pagos ≤ 0 ({Tot:N2}) para {CC}/{F:yyyy-MM-dd}/{T}. " +
+                "Cobro omitido (devoluciones cancelan ventas).",
+                totalPagado, cardCode, fecha, transType);
+            return false;
+        }
+
         var request = new SapIncomingPaymentRequest
         {
-            CardCode = cardCode,
-            DocDate  = fecha.ToString("yyyy-MM-dd"),
+            CardCode  = cardCode,
+            DocDate   = fecha.ToString("yyyy-MM-dd"),
+            BPLID     = bplId > 0 ? bplId : null,
             PaymentInvoices =
             [
                 new SapPaymentInvoice
@@ -466,39 +481,80 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
             switch (map.PaymentType.ToUpperInvariant())
             {
                 case "CASH":
+                    if (string.IsNullOrWhiteSpace(map.SapAccount))
+                    {
+                        _logger.LogWarning(
+                            "TenderID '{T}' (CASH): SapAccount vacío en ADR_TENDER_SAP.", tenderGrupo.Key);
+                        algunSinMapeo = true;
+                        continue;
+                    }
                     request.CashAccount = map.SapAccount;
                     request.CashSum     = (request.CashSum ?? 0) + suma;
+                    _logger.LogInformation("  Tender {T}: Cash {M:N2} → cuenta '{C}'", tenderGrupo.Key, suma, map.SapAccount);
                     break;
 
                 case "CREDITCARD":
+                    if (!int.TryParse(map.SapAccount, out var ccCode))
+                    {
+                        _logger.LogWarning(
+                            "TenderID '{T}' (CREDITCARD): SapAccount='{A}' no es código numérico válido.",
+                            tenderGrupo.Key, map.SapAccount);
+                        algunSinMapeo = true;
+                        continue;
+                    }
                     request.PaymentCreditCards ??= [];
-                    if (int.TryParse(map.SapAccount, out var ccCode))
-                        request.PaymentCreditCards.Add(new SapPaymentCreditCard
-                        {
-                            CreditCard = ccCode,
-                            CreditSum  = suma
-                        });
+                    // Agregar al mismo código si ya existe (varios tenders → mismo código SAP)
+                    var existingCc = request.PaymentCreditCards.FirstOrDefault(cc => cc.CreditCard == ccCode);
+                    if (existingCc != null)
+                        existingCc.CreditSum += suma;
+                    else
+                        request.PaymentCreditCards.Add(new SapPaymentCreditCard { CreditCard = ccCode, CreditSum = suma });
+                    _logger.LogInformation("  Tender {T}: CreditCard {M:N2} → código {C}", tenderGrupo.Key, suma, ccCode);
                     break;
 
                 case "CHECK":
                 case "TRANSFER":
+                    if (string.IsNullOrWhiteSpace(map.SapAccount))
+                    {
+                        _logger.LogWarning(
+                            "TenderID '{T}' ({Tipo}): SapAccount vacío en ADR_TENDER_SAP.", tenderGrupo.Key, map.PaymentType);
+                        algunSinMapeo = true;
+                        continue;
+                    }
                     request.PaymentChecks ??= [];
                     request.PaymentChecks.Add(new SapPaymentCheck
                     {
                         AccountNo = map.SapAccount,
                         CheckSum  = suma
                     });
+                    _logger.LogInformation("  Tender {T}: {Tipo} {M:N2} → AccountNo='{C}'",
+                        tenderGrupo.Key, map.PaymentType, suma, map.SapAccount);
                     break;
+
+                default:
+                    _logger.LogWarning(
+                        "TenderID '{T}': PaymentType='{P}' desconocido en ADR_TENDER_SAP. " +
+                        "Usa CASH, CREDITCARD, CHECK o TRANSFER.", tenderGrupo.Key, map.PaymentType);
+                    algunSinMapeo = true;
+                    continue;
             }
         }
 
         if (algunSinMapeo)
         {
             _logger.LogWarning(
-                "Cobro de {CC}/{F:yyyy-MM-dd}/{T} omitido por TenderIDs sin mapeo.",
+                "Cobro de {CC}/{F:yyyy-MM-dd}/{T} omitido por TenderIDs sin mapeo o SapAccount inválido.",
                 cardCode, fecha, transType);
             return false;
         }
+
+        _logger.LogInformation(
+            "Enviando cobro {CC}/{F:yyyy-MM-dd}/{T}: Total={Tot:N2} | " +
+            "Cash={Cash} | CreditCards={NCc} | Checks/Transfers={NChk}",
+            cardCode, fecha, transType, totalPagado,
+            request.CashSum.HasValue ? $"{request.CashSum:N2} ({request.CashAccount})" : "-",
+            request.PaymentCreditCards?.Count ?? 0,
+            request.PaymentChecks?.Count ?? 0);
 
         try
         {
@@ -538,7 +594,7 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
 
             bool ok = await FaseC_CrearCobroAsync(
                 inv.CardCode, inv.FechaDoc, inv.TransType,
-                inv.InvoiceDocEntry!.Value, tenderMappings);
+                inv.BPLId, inv.InvoiceDocEntry!.Value, tenderMappings);
 
             if (ok) cobros++;
         }

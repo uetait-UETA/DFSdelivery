@@ -51,6 +51,7 @@ public class SapIncomingPaymentRequest
 {
     public string CardCode { get; set; } = string.Empty;
     public string DocDate { get; set; } = string.Empty;
+    public int? BPLID { get; set; }
 
     public List<SapPaymentInvoice> PaymentInvoices { get; set; } = [];
 
@@ -83,6 +84,10 @@ public class SapPaymentCreditCard
     /// <summary>Código de tarjeta en SAP B1 (tabla CreditCard).</summary>
     public int CreditCard { get; set; }
     public decimal CreditSum { get; set; }
+    /// <summary>SAP B1 requiere este campo. Usamos fecha futura genérica para pagos POS sin fecha de vencimiento real.</summary>
+    public string CardValidUntil { get; set; } = "2049-12-31";
+    /// <summary>SAP B1 requiere este campo. Para pagos POS sin número de autorización usamos "POS".</summary>
+    public string VoucherNum { get; set; } = "POS";
 }
 
 public class SapPaymentCheck
@@ -95,7 +100,7 @@ public class SapPaymentCheck
 
 public class SapDocumentExpense
 {
-    [JsonPropertyName("ExpnsCode")]
+    [JsonPropertyName("ExpenseCode")]
     public int ExpnsCode { get; set; }
 
     [JsonPropertyName("LineTotal")]

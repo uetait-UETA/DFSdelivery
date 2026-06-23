@@ -112,7 +112,7 @@ public class DailyInvoiceRepository : IDailyInvoiceRepository
     public async Task<IEnumerable<DailyInvoice>> GetFacturasSinCobroAsync()
     {
         const string sql = """
-            SELECT CardCode, FechaDoc, TransType, InvoiceDocEntry
+            SELECT CardCode, BPLId, FechaDoc, TransType, InvoiceDocEntry
             FROM [dbo].[la_daily_invoices]
             WHERE InvoiceDocNum > 0
               AND PaymentDocNum IS NULL

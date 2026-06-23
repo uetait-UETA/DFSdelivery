@@ -111,7 +111,11 @@ public class StoreSalesRepository : IStoreSalesRepository
                 ISNULL(SalesTaxAmount, 0)      AS SalesTaxAmount,
                 ISNULL(TicketNo, '')           AS TicketNo
             FROM [dbo].[la_store_sales]
-            WHERE DeliveryDocNum IS NULL OR DeliveryDocNum = -1
+            WHERE (DeliveryDocNum IS NULL OR DeliveryDocNum = -1)
+              AND NOT EXISTS (
+                  SELECT 1 FROM [dbo].[la_delivery_errors] de
+                  WHERE de.transnum = transnum
+              )
             ORDER BY Itemdatetime, Transnum, Itemnum
             """;
 

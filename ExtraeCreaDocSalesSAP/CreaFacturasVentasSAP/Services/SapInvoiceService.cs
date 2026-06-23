@@ -231,7 +231,7 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
     public async Task<int> CreateIncomingPaymentAsync(SapIncomingPaymentRequest request)
     {
         var jsonBody = JsonSerializer.Serialize(request, JsonSendOpts);
-        _logger.LogDebug("POST IncomingPayments: {Body}", jsonBody);
+        _logger.LogInformation("POST IncomingPayments: {Body}", jsonBody);
 
         for (int attempt = 1; attempt <= _cfg.MaxRetries; attempt++)
         {

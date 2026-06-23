@@ -40,13 +40,13 @@ var host = Host.CreateDefaultBuilder(args)
     })
     .Build();
 
-await using var scope = host.Services.CreateAsyncScope();
-var orchestrator = scope.ServiceProvider.GetRequiredService<IInvoiceOrchestrator>();
-
 bool paymentsOnly = args.Contains("--payments-only", StringComparer.OrdinalIgnoreCase);
 
 try
 {
+    await using var scope = host.Services.CreateAsyncScope();
+    var orchestrator = scope.ServiceProvider.GetRequiredService<IInvoiceOrchestrator>();
+
     if (paymentsOnly)
         await orchestrator.RunPaymentsOnlyAsync();
     else
