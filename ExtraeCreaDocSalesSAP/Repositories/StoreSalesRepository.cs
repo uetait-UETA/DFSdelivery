@@ -110,13 +110,13 @@ public class StoreSalesRepository : IStoreSalesRepository
                 DutyType,
                 ISNULL(SalesTaxAmount, 0)      AS SalesTaxAmount,
                 ISNULL(TicketNo, '')           AS TicketNo
-            FROM [dbo].[la_store_sales]
-            WHERE (DeliveryDocNum IS NULL OR DeliveryDocNum = -1)
+            FROM [dbo].[la_store_sales] ss
+            WHERE (ss.DeliveryDocNum IS NULL OR ss.DeliveryDocNum = -1)
               AND NOT EXISTS (
                   SELECT 1 FROM [dbo].[la_delivery_errors] de
-                  WHERE de.transnum = transnum
+                  WHERE de.transnum = ss.transnum
               )
-            ORDER BY Itemdatetime, Transnum, Itemnum
+            ORDER BY ss.Itemdatetime, ss.Transnum, ss.Itemnum
             """;
 
         await using var conn = _factory.CreateInternal();
