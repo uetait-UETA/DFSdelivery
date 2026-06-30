@@ -157,9 +157,19 @@ public class SapInvoiceService : ISapInvoiceService, IAsyncDisposable
                 }
 
                 var doc = await response.Content.ReadFromJsonAsync<SapDeliveryNoteResponse>(JsonOpts);
+
+                var allLines  = doc?.DocumentLines ?? [];
+                var openLines = allLines.Where(l => l.LineStatus != "bost_Close").ToList();
+                var closedCnt = allLines.Count - openLines.Count;
+                if (closedCnt > 0)
+                    _logger.LogWarning(
+                        "{Entity} DocEntry={DE}: se omiten {N} línea(s) ya facturada(s) (bost_Close). " +
+                        "Líneas abiertas restantes: {Open}.",
+                        sapEntity, docEntry, closedCnt, openLines.Count);
+
                 return new SapDocumentData
                 {
-                    Lines    = doc?.DocumentLines    ?? [],
+                    Lines    = openLines,
                     Expenses = doc?.DocumentAdditionalExpenses ?? []
                 };
             }

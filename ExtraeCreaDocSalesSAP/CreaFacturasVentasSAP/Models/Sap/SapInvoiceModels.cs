@@ -143,6 +143,10 @@ public class SapDeliveryLine
 
     [JsonPropertyName("ItemCode")]
     public string? ItemCode { get; set; }
+
+    /// <summary>"bost_Open" = disponible para facturar | "bost_Close" = ya facturado (no se puede reutilizar).</summary>
+    [JsonPropertyName("LineStatus")]
+    public string? LineStatus { get; set; }
 }
 
 /// <summary>Datos combinados de un ODLN/ORDN: líneas de ítems + freights.</summary>

@@ -282,10 +282,12 @@ public class InvoiceOrchestrator : IInvoiceOrchestrator
 
             if (invoiceLines.Count == 0)
             {
-                _logger.LogError("No se pudieron obtener líneas para {CC}/{F:yyyy-MM-dd}/{T}",
+                _logger.LogWarning(
+                    "BLOQUEADO — todas las líneas del ODLN ya están facturadas (bost_Close) o no hay " +
+                    "líneas disponibles para {CC}/{F:yyyy-MM-dd}/{T}. Requiere resolución manual en SAP B1.",
                     cardCode, fecha, transType);
                 await _invoiceRepo.MarkAsErrorAsync(cardCode, fecha, transType,
-                    "No se obtuvieron líneas del ODLN desde SAP");
+                    "Todas las líneas del ODLN ya fueron facturadas (bost_Close). Resolución manual requerida.");
                 continue;
             }
 
