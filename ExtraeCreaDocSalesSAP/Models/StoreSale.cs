@@ -38,6 +38,12 @@ public class StoreSale
     /// <summary>Concatenación de SiteID-CashDrawerID-NroTicket del POS.</summary>
     public string TicketNo { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Bodega override seleccionada manualmente desde la pantalla de ajuste.
+    /// Si tiene valor, tiene prioridad sobre ADR_TIENDA_SERIE para el stock check y la línea del ODLN.
+    /// </summary>
+    public string? WhsCode { get; set; }
+
     public bool EsDevolucion => Txnmodifier == 1;
 
     /// <summary>Impuesto derivado de los montos ya almacenados — sin columna extra.</summary>

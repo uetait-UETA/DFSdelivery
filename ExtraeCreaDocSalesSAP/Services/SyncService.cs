@@ -59,7 +59,11 @@ public class SyncService : ISyncService
         }
         else
         {
-            try   { procesados = await ProcessPendingAsync(mappings, ct); }
+            try
+            {
+                await LiberarErroresStockAsync(mappings, ct);
+                procesados = await ProcessPendingAsync(mappings, ct);
+            }
             finally { await _sap.LogoutAsync(); }
         }
 
@@ -69,6 +73,87 @@ public class SyncService : ISyncService
         _logger.LogInformation("═══════════════════════════════════════════════════════");
 
         return procesados;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FASE 0 — Auto-liberación de errores de stock
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private async Task<int> LiberarErroresStockAsync(
+        Dictionary<string, TiendaSerie> mappings, CancellationToken ct)
+    {
+        _logger.LogInformation("Fase 0: revisando errores de stock en la_delivery_errors...");
+
+        var errorItems = (await _salesRepo.GetStockErrorItemsAsync()).ToList();
+        if (errorItems.Count == 0)
+        {
+            _logger.LogInformation("Fase 0: sin errores de stock pendientes.");
+            return 0;
+        }
+
+        var grupos = errorItems.GroupBy(e => e.Transnum).ToList();
+        _logger.LogInformation("Fase 0: {Count} transacción(es) con error de stock.", grupos.Count);
+
+        int liberadas = 0;
+        foreach (var grupo in grupos)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            var transnum = grupo.Key;
+            bool todosOk = true;
+
+            foreach (var item in grupo)
+            {
+                string whsCode;
+                if (!string.IsNullOrWhiteSpace(item.WhsCode))
+                {
+                    whsCode = item.WhsCode.Trim();
+                }
+                else
+                {
+                    var numStore = int.TryParse(item.Storenum, out var s) ? s : 0;
+                    var itemKey  = TiendaSerie.BuildKey(item.Numserie, numStore, item.DutyType);
+
+                    if (!mappings.TryGetValue(itemKey, out var tienda))
+                    {
+                        _logger.LogWarning(
+                            "Fase 0: Txn={Txn} SKU={Sku} — sin mapeo ADR_TIENDA_SERIE, sigue bloqueada.",
+                            transnum, item.Skunum);
+                        todosOk = false;
+                        break;
+                    }
+                    whsCode = tienda.WhsCode;
+                }
+
+                decimal disponible = await _sap.GetAvailableStockAsync(item.Skunum, whsCode);
+
+                if (disponible < item.Qty)
+                {
+                    _logger.LogInformation(
+                        "  Txn={Txn} | SKU={Sku} whs={Whs} — Stock insuficiente (disp={D}, req={R})",
+                        transnum, item.Skunum, whsCode, disponible, item.Qty);
+                    todosOk = false;
+                    break;
+                }
+
+                _logger.LogInformation(
+                    "  Txn={Txn} | SKU={Sku} whs={Whs} — Stock OK (disp={D}, req={R})",
+                    transnum, item.Skunum, whsCode, disponible, item.Qty);
+            }
+
+            if (todosOk)
+            {
+                await _salesRepo.ClearErrorsByTransnumAsync(transnum);
+                _logger.LogInformation("  Txn={Txn} → LIBERADA, se reintentará en Fase 2.", transnum);
+                liberadas++;
+            }
+        }
+
+        _logger.LogInformation(
+            "Fase 0 completada — Liberadas: {L} | Siguen bloqueadas: {B}",
+            liberadas, grupos.Count - liberadas);
+
+        return liberadas;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -257,10 +342,19 @@ public class SyncService : ISyncService
             return false;
         }
 
-        // Pre-calcular bodega por ítem según su DutyType (solo ítems de documento)
+        // Pre-calcular bodega por ítem: override manual tiene prioridad sobre ADR_TIENDA_SERIE
         var whsByItemId = new Dictionary<long, string>();
         foreach (var item in itemsDocumento)
         {
+            if (!string.IsNullOrWhiteSpace(item.WhsCode))
+            {
+                _logger.LogDebug(
+                    "  SKU={Sku} Txn={Txn} — bodega override: {Whs}",
+                    item.Skunum, transnum, item.WhsCode.Trim());
+                whsByItemId[item.ID] = item.WhsCode.Trim();
+                continue;
+            }
+
             var itemKey = TiendaSerie.BuildKey(item.Numserie, numStore, item.DutyType);
             if (!mappings.TryGetValue(itemKey, out var itemTienda))
             {

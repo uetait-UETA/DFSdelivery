@@ -26,6 +26,15 @@ public interface IStoreSalesRepository
 
     /// <summary>Actualiza DeliveryDocEntry para todos los ítems con ese DocNum.</summary>
     Task UpdateDocEntryByDocNumAsync(long docNum, long docEntry);
+
+    /// <summary>
+    /// Retorna los ítems en la_delivery_errors por error de inventario,
+    /// enriquecidos con DutyType/Numserie/Storenum desde la_store_sales.
+    /// </summary>
+    Task<IEnumerable<StockErrorItem>> GetStockErrorItemsAsync();
+
+    /// <summary>Elimina todas las filas de la_delivery_errors para el transnum dado.</summary>
+    Task ClearErrorsByTransnumAsync(string transnum);
 }
 
 public class StoreSalesRepository : IStoreSalesRepository
@@ -105,11 +114,12 @@ public class StoreSalesRepository : IStoreSalesRepository
                 NUMALBARAN          AS Numalbaran,
                 ABONODE_NUMALBARAN  AS Abonode_Numalbaran,
                 ABONODE_NUMSERIE    AS Abonode_Numserie,
-                ISNULL(TRANSTYPE, 'DF')        AS TransType,
-                ISNULL(CodigoImpuesto, '')     AS CodigoImpuesto,
-                DutyType,
+                ISNULL(TRANSTYPE, 'DF')                        AS TransType,
+                ISNULL(CodigoImpuesto, '')                     AS CodigoImpuesto,
+                ISNULL(DutyType, ISNULL(TRANSTYPE, 'DF'))      AS DutyType,
                 ISNULL(SalesTaxAmount, 0)      AS SalesTaxAmount,
-                ISNULL(TicketNo, '')           AS TicketNo
+                ISNULL(TicketNo, '')           AS TicketNo,
+                WhsCode
             FROM [dbo].[la_store_sales] ss
             WHERE (ss.DeliveryDocNum IS NULL OR ss.DeliveryDocNum = -1)
               AND NOT EXISTS (
@@ -220,5 +230,33 @@ public class StoreSalesRepository : IStoreSalesRepository
             "UPDATE [dbo].[la_store_sales] SET DeliveryDocEntry = @DocEntry WHERE DeliveryDocNum = @DocNum";
         await using var conn = _factory.CreateInternal();
         await conn.ExecuteAsync(sql, new { DocNum = docNum, DocEntry = docEntry });
+    }
+
+    public async Task<IEnumerable<StockErrorItem>> GetStockErrorItemsAsync()
+    {
+        const string sql = """
+            SELECT
+                de.transnum         AS Transnum,
+                ss.skunum           AS Skunum,
+                ABS(de.qty)         AS Qty,
+                ISNULL(ss.DutyType, ISNULL(ss.TRANSTYPE, 'DF')) AS DutyType,
+                ss.NUMSERIE         AS Numserie,
+                ss.storenum         AS Storenum,
+                ss.WhsCode          AS WhsCode
+            FROM [dbo].[la_delivery_errors] de
+            INNER JOIN [dbo].[la_store_sales] ss
+                ON ss.transnum = de.transnum AND ss.itemnum = de.itemnum
+            WHERE de.error_message LIKE '%Insufficient Inventory%'
+            """;
+
+        await using var conn = _factory.CreateInternal();
+        return await conn.QueryAsync<StockErrorItem>(sql);
+    }
+
+    public async Task ClearErrorsByTransnumAsync(string transnum)
+    {
+        const string sql = "DELETE FROM [dbo].[la_delivery_errors] WHERE transnum = @Transnum";
+        await using var conn = _factory.CreateInternal();
+        await conn.ExecuteAsync(sql, new { Transnum = transnum });
     }
 }
