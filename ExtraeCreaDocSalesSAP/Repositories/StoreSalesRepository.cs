@@ -35,6 +35,12 @@ public interface IStoreSalesRepository
 
     /// <summary>Elimina todas las filas de la_delivery_errors para el transnum dado.</summary>
     Task ClearErrorsByTransnumAsync(string transnum);
+
+    /// <summary>
+    /// Retorna los transnum distintos que tienen errores SAP ([SAP Error]) en la_delivery_errors.
+    /// Excluye errores de configuración ([Sin Mapeo]) que requieren intervención manual.
+    /// </summary>
+    Task<IEnumerable<string>> GetSapErrorTransnumsAsync();
 }
 
 public class StoreSalesRepository : IStoreSalesRepository
@@ -258,5 +264,17 @@ public class StoreSalesRepository : IStoreSalesRepository
         const string sql = "DELETE FROM [dbo].[la_delivery_errors] WHERE transnum = @Transnum";
         await using var conn = _factory.CreateInternal();
         await conn.ExecuteAsync(sql, new { Transnum = transnum });
+    }
+
+    public async Task<IEnumerable<string>> GetSapErrorTransnumsAsync()
+    {
+        const string sql = """
+            SELECT DISTINCT transnum
+            FROM [dbo].[la_delivery_errors]
+            WHERE error_message LIKE '%[SAP Error]%'
+            """;
+
+        await using var conn = _factory.CreateInternal();
+        return await conn.QueryAsync<string>(sql);
     }
 }

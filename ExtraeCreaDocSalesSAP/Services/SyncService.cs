@@ -62,6 +62,7 @@ public class SyncService : ISyncService
             try
             {
                 await LiberarErroresStockAsync(mappings, ct);
+                await LiberarErroresSapAsync(ct);
                 procesados = await ProcessPendingAsync(mappings, ct);
             }
             finally { await _sap.LogoutAsync(); }
@@ -154,6 +155,36 @@ public class SyncService : ISyncService
             liberadas, grupos.Count - liberadas);
 
         return liberadas;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FASE 0-B — Auto-reintento de errores SAP
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private async Task<int> LiberarErroresSapAsync(CancellationToken ct)
+    {
+        _logger.LogInformation("Fase 0-B: revisando errores SAP para reintento...");
+
+        var transnums = (await _salesRepo.GetSapErrorTransnumsAsync()).ToList();
+        if (transnums.Count == 0)
+        {
+            _logger.LogInformation("Fase 0-B: sin errores SAP pendientes.");
+            return 0;
+        }
+
+        _logger.LogInformation("Fase 0-B: {Count} transacción(es) con error SAP — se liberan para reintento.", transnums.Count);
+
+        int liberados = 0;
+        foreach (var transnum in transnums)
+        {
+            if (ct.IsCancellationRequested) break;
+            await _salesRepo.ClearErrorsByTransnumAsync(transnum);
+            _logger.LogInformation("  Txn={Txn} → liberada para reintento SAP.", transnum);
+            liberados++;
+        }
+
+        _logger.LogInformation("Fase 0-B completada — {Count} transacción(es) liberadas.", liberados);
+        return liberados;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
