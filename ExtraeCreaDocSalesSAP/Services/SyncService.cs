@@ -49,6 +49,8 @@ public class SyncService : ISyncService
             return 0;
         }
 
+        var warehouseLists = await _tiendaRepo.GetWarehouseListsAsync();
+
         int insertados = await ExtractAndStoreAsync(mappings, ct);
 
         int procesados = 0;
@@ -61,9 +63,9 @@ public class SyncService : ISyncService
         {
             try
             {
-                await LiberarErroresStockAsync(mappings, ct);
+                await LiberarErroresStockAsync(mappings, warehouseLists, ct);
                 await LiberarErroresSapAsync(ct);
-                procesados = await ProcessPendingAsync(mappings, ct);
+                procesados = await ProcessPendingAsync(mappings, warehouseLists, ct);
             }
             finally { await _sap.LogoutAsync(); }
         }
@@ -81,7 +83,9 @@ public class SyncService : ISyncService
     // ─────────────────────────────────────────────────────────────────────────
 
     private async Task<int> LiberarErroresStockAsync(
-        Dictionary<string, TiendaSerie> mappings, CancellationToken ct)
+        Dictionary<string, TiendaSerie> mappings,
+        Dictionary<string, List<string>> warehouseLists,
+        CancellationToken ct)
     {
         _logger.LogInformation("Fase 0: revisando errores de stock en la_delivery_errors...");
 
@@ -105,17 +109,30 @@ public class SyncService : ISyncService
 
             foreach (var item in grupo)
             {
-                string whsCode;
                 if (!string.IsNullOrWhiteSpace(item.WhsCode))
                 {
-                    whsCode = item.WhsCode.Trim();
+                    // Override manual: verificar solo esa bodega
+                    var overrideWhs    = item.WhsCode.Trim();
+                    decimal disponible = await _sap.GetAvailableStockAsync(item.Skunum, overrideWhs);
+                    if (disponible < item.Qty)
+                    {
+                        _logger.LogInformation(
+                            "  Txn={Txn} | SKU={Sku} whs={Whs} (override) — Stock insuficiente (disp={D}, req={R})",
+                            transnum, item.Skunum, overrideWhs, disponible, item.Qty);
+                        todosOk = false;
+                        break;
+                    }
+                    _logger.LogInformation(
+                        "  Txn={Txn} | SKU={Sku} whs={Whs} (override) — Stock OK (disp={D}, req={R})",
+                        transnum, item.Skunum, overrideWhs, disponible, item.Qty);
                 }
                 else
                 {
+                    // Sin override: probar todas las bodegas en orden
                     var numStore = int.TryParse(item.Storenum, out var s) ? s : 0;
                     var itemKey  = TiendaSerie.BuildKey(item.Numserie, numStore, item.DutyType);
 
-                    if (!mappings.TryGetValue(itemKey, out var tienda))
+                    if (!warehouseLists.TryGetValue(itemKey, out var whsList) || whsList.Count == 0)
                     {
                         _logger.LogWarning(
                             "Fase 0: Txn={Txn} SKU={Sku} — sin mapeo ADR_TIENDA_SERIE, sigue bloqueada.",
@@ -123,23 +140,37 @@ public class SyncService : ISyncService
                         todosOk = false;
                         break;
                     }
-                    whsCode = tienda.WhsCode;
+
+                    string? whsConStock = null;
+                    foreach (var whs in whsList)
+                    {
+                        decimal disponible = await _sap.GetAvailableStockAsync(item.Skunum, whs);
+                        if (disponible >= item.Qty)
+                        {
+                            _logger.LogInformation(
+                                "  Txn={Txn} | SKU={Sku} whs={Whs} — Stock OK (disp={D}, req={R})",
+                                transnum, item.Skunum, whs, disponible, item.Qty);
+                            whsConStock = whs;
+                            break;
+                        }
+                        _logger.LogInformation(
+                            "  Txn={Txn} | SKU={Sku} whs={Whs} — insuficiente (disp={D}, req={R}){Next}",
+                            transnum, item.Skunum, whs, disponible, item.Qty,
+                            whsList.Count > 1 ? ", prueba siguiente..." : "");
+                    }
+
+                    if (whsConStock is null)
+                    {
+                        todosOk = false;
+                        break;
+                    }
+
+                    // Persistir la bodega encontrada para que Fase 2 la use directamente
+                    await _salesRepo.UpdateWhsCodeAsync(item.Id, whsConStock);
+                    _logger.LogDebug(
+                        "  Txn={Txn} SKU={Sku} → WhsCode={Whs} guardado en la_store_sales",
+                        transnum, item.Skunum, whsConStock);
                 }
-
-                decimal disponible = await _sap.GetAvailableStockAsync(item.Skunum, whsCode);
-
-                if (disponible < item.Qty)
-                {
-                    _logger.LogInformation(
-                        "  Txn={Txn} | SKU={Sku} whs={Whs} — Stock insuficiente (disp={D}, req={R})",
-                        transnum, item.Skunum, whsCode, disponible, item.Qty);
-                    todosOk = false;
-                    break;
-                }
-
-                _logger.LogInformation(
-                    "  Txn={Txn} | SKU={Sku} whs={Whs} — Stock OK (disp={D}, req={R})",
-                    transnum, item.Skunum, whsCode, disponible, item.Qty);
             }
 
             if (todosOk)
@@ -308,7 +339,9 @@ public class SyncService : ISyncService
     // ─────────────────────────────────────────────────────────────────────────
 
     private async Task<int> ProcessPendingAsync(
-        Dictionary<string, TiendaSerie> mappings, CancellationToken ct)
+        Dictionary<string, TiendaSerie> mappings,
+        Dictionary<string, List<string>> warehouseLists,
+        CancellationToken ct)
     {
         _logger.LogInformation("Fase 2: procesando registros pendientes...");
 
@@ -324,7 +357,7 @@ public class SyncService : ISyncService
         foreach (var grupo in grupos)
         {
             if (ct.IsCancellationRequested) break;
-            if (await ProcessTransactionGroupAsync(grupo.ToList(), mappings))
+            if (await ProcessTransactionGroupAsync(grupo.ToList(), mappings, warehouseLists))
                 docsCreados++;
         }
 
@@ -332,7 +365,9 @@ public class SyncService : ISyncService
     }
 
     private async Task<bool> ProcessTransactionGroupAsync(
-        List<StoreSale> items, Dictionary<string, TiendaSerie> mappings)
+        List<StoreSale> items,
+        Dictionary<string, TiendaSerie> mappings,
+        Dictionary<string, List<string>> warehouseLists)
     {
         var transnum     = items[0].Transnum;
         var esDevolucion = items[0].EsDevolucion;
@@ -373,10 +408,13 @@ public class SyncService : ISyncService
             return false;
         }
 
-        // Pre-calcular bodega por ítem: override manual tiene prioridad sobre ADR_TIENDA_SERIE
+        // Seleccionar bodega por ítem con verificación de stock integrada
         var whsByItemId = new Dictionary<long, string>();
+        var idsConError = new HashSet<long>();
+
         foreach (var item in itemsDocumento)
         {
+            // 1. Override manual tiene prioridad absoluta (no se verifica stock)
             if (!string.IsNullOrWhiteSpace(item.WhsCode))
             {
                 _logger.LogDebug(
@@ -386,8 +424,9 @@ public class SyncService : ISyncService
                 continue;
             }
 
+            // 2. Obtener lista de bodegas para este ítem
             var itemKey = TiendaSerie.BuildKey(item.Numserie, numStore, item.DutyType);
-            if (!mappings.TryGetValue(itemKey, out var itemTienda))
+            if (!warehouseLists.TryGetValue(itemKey, out var whsList) || whsList.Count == 0)
             {
                 _logger.LogError(
                     "Sin mapeo ADR_TIENDA_SERIE para ítem — SKU={Sku}, DutyType={D}, Txn={Txn}",
@@ -397,35 +436,59 @@ public class SyncService : ISyncService
                         $"No existe ADR_TIENDA_SERIE para ítem SKU={item.Skunum}, DutyType={item.DutyType}");
                 return false;
             }
-            whsByItemId[item.ID] = itemTienda.WhsCode;
+
+            // 3. Devoluciones: usar primera bodega (no se verifica stock)
+            if (esDevolucion)
+            {
+                whsByItemId[item.ID] = whsList[0];
+                await _salesRepo.UpdateWhsCodeAsync(item.ID, whsList[0]);
+                continue;
+            }
+
+            // 4. Ventas: buscar primera bodega con stock suficiente
+            string? whsConStock = null;
+            foreach (var whs in whsList)
+            {
+                decimal disponible = await _sap.GetAvailableStockAsync(item.Skunum, whs);
+                if (disponible >= item.Qty)
+                {
+                    _logger.LogDebug(
+                        "  SKU={Sku} Txn={Txn} — bodega {Whs}: stock OK (disp={D}, req={R})",
+                        item.Skunum, transnum, whs, disponible, item.Qty);
+                    whsConStock = whs;
+                    break;
+                }
+                _logger.LogDebug(
+                    "  SKU={Sku} Txn={Txn} — bodega {Whs}: insuficiente (disp={D}, req={R}){Next}",
+                    item.Skunum, transnum, whs, disponible, item.Qty,
+                    whsList.Count > 1 ? ", prueba siguiente..." : "");
+            }
+
+            if (whsConStock is not null)
+            {
+                whsByItemId[item.ID] = whsConStock;
+                await _salesRepo.UpdateWhsCodeAsync(item.ID, whsConStock);
+            }
+            else
+            {
+                // Sin stock en ninguna bodega: registrar error con la primera de la lista
+                var fallback = whsList[0];
+                _logger.LogWarning(
+                    "Stock insuficiente en todas las bodegas — SKU={Sku}, Bodegas={Whs}, Txn={Txn}",
+                    item.Skunum, string.Join(",", whsList), transnum);
+                await RegistrarError(item, "Insufficient Inventory",
+                    $"Sin stock en ninguna bodega: {string.Join(", ", whsList)}");
+                idsConError.Add(item.ID);
+                whsByItemId[item.ID] = fallback;
+            }
         }
+
+        if (idsConError.Count > 0)
+            return false;
 
         _logger.LogDebug(
             "Txn={Txn} | {Tipo} | BPLId={BPL} | CardCode={CC}",
             transnum, tipoDoc, tienda.BPLId, tienda.CardCode);
-
-        // ── Validar inventario (solo ventas, solo ítems de documento) ─────────
-        if (!esDevolucion)
-        {
-            var idsConError = new HashSet<long>();
-            foreach (var item in itemsDocumento)
-            {
-                var whsCode        = whsByItemId[item.ID];
-                decimal disponible = await _sap.GetAvailableStockAsync(item.Skunum, whsCode);
-                if (disponible < item.Qty)
-                {
-                    _logger.LogWarning(
-                        "Stock insuficiente — SKU={Sku}, Whs={Whs}, Disp={D}, Req={R}, Txn={Txn}",
-                        item.Skunum, whsCode, disponible, item.Qty, transnum);
-                    await RegistrarError(item, "Insufficient Inventory",
-                        $"Stock disponible: {disponible}, requerido: {item.Qty}, bodega: {whsCode}");
-                    idsConError.Add(item.ID);
-                }
-            }
-
-            if (idsConError.Count > 0)
-                return false;
-        }
 
         // ── Construir documento SAP ───────────────────────────────────────────
         var fechaDoc = items[0].Itemdatetime.ToString("yyyy-MM-dd");

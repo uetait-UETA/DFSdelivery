@@ -36,6 +36,9 @@ public interface IStoreSalesRepository
     /// <summary>Elimina todas las filas de la_delivery_errors para el transnum dado.</summary>
     Task ClearErrorsByTransnumAsync(string transnum);
 
+    /// <summary>Actualiza WhsCode en la_store_sales para el ítem con el ID dado.</summary>
+    Task UpdateWhsCodeAsync(long id, string whsCode);
+
     /// <summary>
     /// Retorna los transnum distintos que tienen errores SAP ([SAP Error]) en la_delivery_errors.
     /// Excluye errores de configuración ([Sin Mapeo]) que requieren intervención manual.
@@ -242,6 +245,7 @@ public class StoreSalesRepository : IStoreSalesRepository
     {
         const string sql = """
             SELECT
+                ss.ID               AS Id,
                 de.transnum         AS Transnum,
                 ss.skunum           AS Skunum,
                 ABS(de.qty)         AS Qty,
@@ -257,6 +261,13 @@ public class StoreSalesRepository : IStoreSalesRepository
 
         await using var conn = _factory.CreateInternal();
         return await conn.QueryAsync<StockErrorItem>(sql);
+    }
+
+    public async Task UpdateWhsCodeAsync(long id, string whsCode)
+    {
+        const string sql = "UPDATE [dbo].[la_store_sales] SET WhsCode = @WhsCode WHERE ID = @Id";
+        await using var conn = _factory.CreateInternal();
+        await conn.ExecuteAsync(sql, new { Id = id, WhsCode = whsCode });
     }
 
     public async Task ClearErrorsByTransnumAsync(string transnum)

@@ -6,6 +6,7 @@ namespace ExtraeCreaDocSalesSAP.Models;
 /// </summary>
 public class StockErrorItem
 {
+    public long Id          { get; set; }
     public string Transnum  { get; set; } = string.Empty;
     public string Skunum    { get; set; } = string.Empty;
     public decimal Qty      { get; set; }
