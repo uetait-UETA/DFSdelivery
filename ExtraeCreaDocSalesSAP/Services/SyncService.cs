@@ -99,6 +99,9 @@ public class SyncService : ISyncService
         var grupos = errorItems.GroupBy(e => e.Transnum).ToList();
         _logger.LogInformation("Fase 0: {Count} transacción(es) con error de stock.", grupos.Count);
 
+        var skipCodesF0 = _settings.ProcessingOptions.SkipStockCheckItemCodes
+                              .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         int liberadas = 0;
         foreach (var grupo in grupos)
         {
@@ -109,6 +112,16 @@ public class SyncService : ISyncService
 
             foreach (var item in grupo)
             {
+                // Prioridad máxima: ítems configurados sin validación de stock siempre pasan,
+                // independientemente de si tienen WhsCode override o no.
+                if (skipCodesF0.Contains(item.Skunum.Trim()))
+                {
+                    _logger.LogInformation(
+                        "  Txn={Txn} | SKU={Sku} — stock check omitido (SkipStockCheckItemCodes)",
+                        transnum, item.Skunum);
+                    continue;
+                }
+
                 if (!string.IsNullOrWhiteSpace(item.WhsCode))
                 {
                     // Override manual: verificar solo esa bodega
@@ -139,18 +152,6 @@ public class SyncService : ISyncService
                             transnum, item.Skunum);
                         todosOk = false;
                         break;
-                    }
-
-                    // Ítems configurados sin validación de stock: siempre pasan
-                    var skipCodesF0 = _settings.ProcessingOptions.SkipStockCheckItemCodes
-                                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    if (skipCodesF0.Contains(item.Skunum.Trim()))
-                    {
-                        await _salesRepo.UpdateWhsCodeAsync(item.Id, whsList[0]);
-                        _logger.LogInformation(
-                            "  Txn={Txn} | SKU={Sku} — stock check omitido (SkipStockCheckItemCodes), bodega {Whs}",
-                            transnum, item.Skunum, whsList[0]);
-                        continue;
                     }
 
                     string? whsConStock = null;
