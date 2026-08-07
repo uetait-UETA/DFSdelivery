@@ -141,6 +141,18 @@ public class SyncService : ISyncService
                         break;
                     }
 
+                    // Ítems configurados sin validación de stock: siempre pasan
+                    var skipCodesF0 = _settings.ProcessingOptions.SkipStockCheckItemCodes
+                                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    if (skipCodesF0.Contains(item.Skunum.Trim()))
+                    {
+                        await _salesRepo.UpdateWhsCodeAsync(item.Id, whsList[0]);
+                        _logger.LogInformation(
+                            "  Txn={Txn} | SKU={Sku} — stock check omitido (SkipStockCheckItemCodes), bodega {Whs}",
+                            transnum, item.Skunum, whsList[0]);
+                        continue;
+                    }
+
                     string? whsConStock = null;
                     foreach (var whs in whsList)
                     {
@@ -411,6 +423,8 @@ public class SyncService : ISyncService
         // Seleccionar bodega por ítem con verificación de stock integrada
         var whsByItemId = new Dictionary<long, string>();
         var idsConError = new HashSet<long>();
+        var skipCodes   = _settings.ProcessingOptions.SkipStockCheckItemCodes
+                              .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in itemsDocumento)
         {
@@ -445,7 +459,18 @@ public class SyncService : ISyncService
                 continue;
             }
 
-            // 4. Ventas: buscar primera bodega con stock suficiente
+            // 4. Ítems configurados sin validación de stock: primera bodega, se incluyen en el ODLN
+            if (skipCodes.Contains(item.Skunum.Trim()))
+            {
+                whsByItemId[item.ID] = whsList[0];
+                await _salesRepo.UpdateWhsCodeAsync(item.ID, whsList[0]);
+                _logger.LogDebug(
+                    "  SKU={Sku} Txn={Txn} — stock check omitido (SkipStockCheckItemCodes), bodega {Whs}",
+                    item.Skunum, transnum, whsList[0]);
+                continue;
+            }
+
+            // 5. Ventas: buscar primera bodega con stock suficiente
             string? whsConStock = null;
             foreach (var whs in whsList)
             {
@@ -615,6 +640,11 @@ public class SyncService : ISyncService
         var deeeCode = _settings.FreightSettings.DeeeItemCode?.Trim();
         if (!string.IsNullOrEmpty(deeeCode) &&
             item.Skunum.Trim().Equals(deeeCode, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Los ítems configurados sin validación de stock tampoco bloquean la_delivery_errors.
+        var skipCodes = _settings.ProcessingOptions.SkipStockCheckItemCodes;
+        if (skipCodes.Any(c => c.Trim().Equals(item.Skunum.Trim(), StringComparison.OrdinalIgnoreCase)))
             return;
 
         await _salesRepo.UpsertErrorAsync(new DeliveryError

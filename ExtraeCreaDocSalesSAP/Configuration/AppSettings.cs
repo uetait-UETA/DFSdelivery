@@ -22,6 +22,12 @@ public class ProcessingOptions
 {
     public int BatchSize { get; set; } = 500;
     public string FilterViewType { get; set; } = "RetailTransactionStockView";
+
+    /// <summary>
+    /// SKUs que se incluyen en el ODLN pero se saltan la validación de stock.
+    /// Útil para ítems de tipo servicio/cargo sin inventario físico en SAP B1.
+    /// </summary>
+    public List<string> SkipStockCheckItemCodes { get; set; } = new();
 }
 
 /// <summary>
